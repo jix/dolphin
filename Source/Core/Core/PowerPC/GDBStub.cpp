@@ -38,6 +38,7 @@ typedef SSIZE_T ssize_t;
 #include "Core/PowerPC/Gekko.h"
 #include "Core/PowerPC/PPCCache.h"
 #include "Core/PowerPC/PowerPC.h"
+#include "Core/State.h"
 #include "Core/System.h"
 
 namespace GDBStub
@@ -325,6 +326,32 @@ static void WriteHostInfo()
           .c_str());
 }
 
+static void HandleMonitor()
+{
+  u32 hex_len = s_cmd_len - strlen("qRcmd,");
+  u32 bin_len = hex_len / 2;
+  Hex2mem(s_cmd_bfr, s_cmd_bfr + strlen("qRcmd,"), bin_len);
+  s_cmd_len = bin_len;
+  s_cmd_bfr[s_cmd_len] = 0;
+
+  DEBUG_LOG_FMT(GDB_STUB, "gdb: monitor cmd: {}", CommandBufferAsString());
+
+  if (!strncmp(CommandBufferAsString(), "load ", strlen("load ")))
+  {
+    State::Load(atoi(CommandBufferAsString() + strlen("load ")));
+    SendReply("OK");
+    return;
+  }
+  else if (!strncmp(CommandBufferAsString(), "save ", strlen("save ")))
+  {
+    State::Save(atoi(CommandBufferAsString() + strlen("save ")));
+    SendReply("OK");
+    return;
+  }
+
+  SendReply("");
+}
+
 static void HandleQuery()
 {
   DEBUG_LOG_FMT(GDB_STUB, "gdb: query '{}'", CommandBufferAsString());
@@ -343,6 +370,8 @@ static void HandleQuery()
     return WriteHostInfo();
   else if (!strncmp((const char*)(s_cmd_bfr), "qSupported", strlen("qSupported")))
     return SendReply("swbreak+;hwbreak+");
+  else if (!strncmp((const char*)(s_cmd_bfr), "qRcmd,", strlen("qRcmd,")))
+    return HandleMonitor();
 
   SendReply("");
 }
