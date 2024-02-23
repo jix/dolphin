@@ -19,6 +19,7 @@ enum class Signal
 void Init(u32 port);
 void InitLocal(const char* socket);
 void Deinit();
+void Reinit();
 bool IsActive();
 bool HasControl();
 void TakeControl();

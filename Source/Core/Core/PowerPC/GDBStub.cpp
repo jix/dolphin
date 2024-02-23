@@ -30,6 +30,7 @@ typedef SSIZE_T ssize_t;
 #include "Common/Logging/Log.h"
 #include "Common/SocketContext.h"
 #include "Common/StringUtil.h"
+#include "Core/Config/MainSettings.h"
 #include "Core/Core.h"
 #include "Core/HW/CPU.h"
 #include "Core/HW/Memmap.h"
@@ -71,6 +72,8 @@ const s64 GDB_UPDATE_CYCLES = 100000;
 
 static bool s_has_control = false;
 static bool s_just_connected = false;
+static bool s_initial_connect = true;
+static bool s_connected = false;
 
 static int s_tmpsock = -1;
 static int s_sock = -1;
@@ -129,6 +132,8 @@ static void Hex2mem(u8* dst, u8* src, u32 len)
 
 static void UpdateCallback(Core::System& system, u64 userdata, s64 cycles_late)
 {
+  if (!s_connected)
+    return;
   ProcessCommands(false);
   if (IsActive())
     Core::System::GetInstance().GetCoreTiming().ScheduleEvent(GDB_UPDATE_CYCLES, s_update_event);
@@ -1063,6 +1068,11 @@ void ProcessCommands(bool loop_until_continue)
     case 'Z':
       HandleAddBreakpoint();
       break;
+    case 'D':
+      Deinit();
+      INFO_LOG_FMT(GDB_STUB, "gdb detached");
+      Reinit();
+      break;
     default:
       SendReply("");
       break;
@@ -1074,6 +1084,26 @@ void ProcessCommands(bool loop_until_continue)
 
 static void InitGeneric(int domain, const sockaddr* server_addr, socklen_t server_addrlen,
                         sockaddr* client_addr, socklen_t* client_addrlen);
+
+void Reinit()
+{
+#ifndef _WIN32
+  std::string gdb_socket = Config::Get(Config::MAIN_GDB_SOCKET);
+  if (!gdb_socket.empty())
+  {
+    GDBStub::InitLocal(gdb_socket.data());
+  }
+  else
+#endif
+  {
+    int gdb_port = Config::Get(Config::MAIN_GDB_PORT);
+    if (gdb_port > 0)
+    {
+      GDBStub::Init(gdb_port);
+    }
+  }
+}
+
 
 #ifndef _WIN32
 void InitLocal(const char* socket)
@@ -1139,11 +1169,15 @@ static void InitGeneric(int domain, const sockaddr* server_addr, socklen_t serve
 #endif
   s_tmpsock = -1;
 
-  auto& system = Core::System::GetInstance();
-  auto& core_timing = system.GetCoreTiming();
-  s_update_event = core_timing.RegisterEvent("GDBStubUpdate", UpdateCallback);
-  core_timing.ScheduleEvent(GDB_UPDATE_CYCLES, s_update_event);
+  if (s_initial_connect) {
+    s_initial_connect = false;
+    auto& system = Core::System::GetInstance();
+    auto& core_timing = system.GetCoreTiming();
+    s_update_event = core_timing.RegisterEvent("GDBStubUpdate", UpdateCallback);
+    core_timing.ScheduleEvent(GDB_UPDATE_CYCLES, s_update_event);
+  }
   s_has_control = true;
+  s_connected = true;
 }
 
 void Deinit()
@@ -1161,6 +1195,7 @@ void Deinit()
 
   s_socket_context.reset();
   s_has_control = false;
+  s_connected = false;
 }
 
 bool IsActive()
